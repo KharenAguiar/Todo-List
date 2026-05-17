@@ -1,98 +1,256 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+﻿import { useEffect, useMemo, useState } from 'react';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StatusBar } from 'expo-status-bar';
+
+import {
+  LogBox,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+
+import { AddTaskModal } from '@/components/AddTaskModal';
+import { FloatingButton } from '@/components/FloatingButton';
+import { TaskSection } from '@/components/TaskSection';
+
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+import { useTheme } from '@/hooks/use-theme';
+
+import { Task, TaskFormState } from '@/types/task';
+
+// remove warning interno da lib de emoji
+LogBox.ignoreLogs([
+  'Non-serializable values were found in the navigation state',
+]);
+
+// chave usada pra salvar localmente
+const TASKS_STORAGE_KEY = '@todo_list_tasks';
+
+// Tela principal: lista de tarefas (Home)
+export default function HomeScreen() {
+
+  // lista principal de tarefas
+  // p/ estudo: `tasks` armazena todas as tarefas em memória
+  const [tasks, setTasks] = useState<Task[]>([]);
+
+  // controla visibilidade do modal de criação
+  const [modalVisible, setModalVisible] = useState(false);
+
+  // hook de tema (p/ UI consistente com o tema do sistema)
+  const theme = useTheme();
+
+  // data formatada em pt-BR (ex.: 17 de maio de 2026)
+  const currentDate = useMemo(
+    () =>
+      new Date().toLocaleDateString('pt-BR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }),
+    []
+  );
+
+  // derive: tarefas pendentes (não concluidas)
+  const pendingTasks = useMemo(
+    () => tasks.filter(task => !task.completed),
+    [tasks]
+  );
+
+  // derive: tarefas concluídas
+  const completedTasks = useMemo(
+    () => tasks.filter(task => task.completed),
+    [tasks]
+  );
+
+  // Efeito: carrega tasks do armazenamento local (AsyncStorage)
+  useEffect(() => {
+
+    async function loadTasks() {
+
+      const raw = await AsyncStorage.getItem(TASKS_STORAGE_KEY);
+
+      // se não há dado salvo, retorna (estado inicial vazio)
+      if (!raw) return;
+
+      try {
+        // parse dos dados salvos (json)
+        const parsedTasks: Task[] = JSON.parse(raw);
+        setTasks(parsedTasks);
+      } catch {
+        // fallback simples: se parse falhar, zera lista
+        setTasks([]);
+      }
+    }
+
+    void loadTasks();
+
+  }, []);
+
+  // Efeito: persiste `tasks` no AsyncStorage sempre que `tasks` muda
+  useEffect(() => {
+
+    void AsyncStorage.setItem(
+      TASKS_STORAGE_KEY,
+      JSON.stringify(tasks)
+    );
+
+  }, [tasks]);
+
+  // Função: adiciona nova tarefa a partir do formulário
+  // Recebe: `taskForm` com campos validados (simples)
+  function handleAddTask(taskForm: TaskFormState) {
+    setTasks(prev => [
+      ...prev,
+      {
+        id: Date.now(), // id simples p/ estudo: timestamp
+        title: taskForm.title,
+        category: taskForm.category,
+        emoji: taskForm.emoji,
+        completed: false,
+      },
+    ]);
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+
+  // Função: alterna o estado `completed` de uma tarefa
+  // Implementação imutável (cria nova array p/ re-render)
+  function handleToggleTask(taskId: number) {
+    setTasks(prev =>
+      prev.map(task =>
+        task.id === taskId
+          ? {
+              ...task,
+              completed: !task.completed,
+            }
+          : task
+      )
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
 
-export default function HomeScreen() {
   return (
-    <ThemedView style={styles.container}>
+
+    <ThemedView
+      style={[
+        styles.root,
+        {
+          backgroundColor: theme.background,
+        },
+      ]}
+    >
+
+      <StatusBar style="auto" />
+
       <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
+
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+
+          {/* titulo */}
+          <ThemedText
+            type="title"
+            style={styles.title}
+          >
+            ToDo List
           </ThemedText>
-        </ThemedView>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+          {/* data atual */}
+          <ThemedText
+            type="small"
+            themeColor="textSecondary"
+            style={styles.date}
+          >
+            {currentDate}
+          </ThemedText>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+          {/* contadores */}
+          <View style={styles.countersRow}>
+
+            <ThemedText style={styles.counter}>
+              Pendentes: {pendingTasks.length}
+            </ThemedText>
+
+            <ThemedText style={styles.counter}>
+              Concluídas: {completedTasks.length}
+            </ThemedText>
+
+          </View>
+
+          {/* tarefas pendentes */}
+          <TaskSection
+            title="Pendentes"
+            tasks={pendingTasks}
+            onToggle={handleToggleTask}
+            emptyMessage="Nenhuma tarefa pendente por enquanto."
+            showCategory
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
 
-        {Platform.OS === 'web' && <WebBadge />}
+          {/* tarefas concluidas */}
+          <TaskSection
+            title="Concluídas"
+            tasks={completedTasks}
+            onToggle={handleToggleTask}
+            emptyMessage="Nenhuma tarefa concluída ainda."
+          />
+
+        </ScrollView>
+
+        {/* botao flutuante */}
+        <FloatingButton
+          onPress={() => setModalVisible(true)}
+        />
+
+        {/* modal de add task */}
+        <AddTaskModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          onAddTask={handleAddTask}
+        />
+
       </SafeAreaView>
+
     </ThemedView>
+
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+
+  root: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
   },
+
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+
+  content: {
+    padding: 24,
+    paddingBottom: 120,
   },
+
   title: {
-    textAlign: 'center',
+    marginBottom: 8,
   },
-  code: {
-    textTransform: 'uppercase',
+
+  date: {
+    marginBottom: 24,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  // linha dos contadores
+  countersRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
   },
+
+  counter: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
 });
